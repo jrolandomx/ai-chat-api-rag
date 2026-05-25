@@ -311,6 +311,26 @@ Pregunta:
         )
 
 
+def run_review_agent(agent_name: str, instructions: str, article_text: str):
+    prompt = f"""
+Actúa como {agent_name}.
+
+{instructions}
+
+Analiza el siguiente artículo científico:
+
+{article_text}
+
+Redacta observaciones académicas profundas, específicas, constructivas y útiles.
+Evita comentarios genéricos. Señala problemas, justifica por qué deben corregirse
+y propone mejoras concretas.
+"""
+
+    response = llm.invoke(prompt)
+
+    return response.content
+
+
 @app.post("/review-article")
 def review_article():
     global uploaded_documents
@@ -328,108 +348,164 @@ def review_article():
             doc.page_content for doc in uploaded_documents
         ])
 
-        max_chars = 45000
+        max_chars = 35000
 
         if len(full_text) > max_chars:
             full_text = full_text[:max_chars]
 
-        review_prompt = f"""
-Eres un revisor académico experto de artículos científicos con experiencia en publicación,
-arbitraje y evaluación editorial en revistas indexadas nacionales e internacionales.
+        methodology_review = run_review_agent(
+            "un revisor metodológico experto",
+            """
+Evalúa exclusivamente el rigor metodológico del artículo.
 
-Tu función es actuar como un dictaminador riguroso, crítico, objetivo y constructivo,
-proporcionando observaciones detalladas que permitan fortalecer la calidad científica,
-metodológica, teórica y editorial del manuscrito evaluado.
+Considera:
+- claridad del diseño metodológico;
+- tipo de estudio;
+- congruencia entre objetivos, método y resultados;
+- población, muestra o corpus;
+- técnicas de recolección de datos;
+- técnicas de análisis;
+- validez, confiabilidad o credibilidad;
+- limitaciones;
+- posibles sesgos;
+- suficiencia de la explicación metodológica.
 
-Mantén un tono profesional, académico y humano. Evita frases genéricas, superficiales
-o excesivamente duras. Señala fortalezas, áreas de mejora y recomendaciones concretas.
+Entrega tu revisión con el encabezado:
+# Revisión metodológica
+""",
+            full_text
+        )
 
-Analiza el siguiente artículo científico:
+        theoretical_review = run_review_agent(
+            "un revisor teórico experto",
+            """
+Evalúa exclusivamente la dimensión teórica y conceptual del artículo.
 
-ARTÍCULO:
-{full_text}
+Considera:
+- pertinencia del marco teórico;
+- actualidad de la literatura;
+- profundidad conceptual;
+- claridad de categorías o variables;
+- relación entre teoría, problema y hallazgos;
+- originalidad del aporte;
+- diálogo con literatura reciente;
+- solidez argumentativa.
 
-Elabora una revisión académica profesional con esta estructura:
+Entrega tu revisión con el encabezado:
+# Revisión teórica
+""",
+            full_text
+        )
+
+        editorial_review = run_review_agent(
+            "un revisor editorial académico",
+            """
+Evalúa exclusivamente la estructura, redacción y coherencia editorial del manuscrito.
+
+Considera:
+- título;
+- resumen;
+- palabras clave;
+- introducción;
+- planteamiento del problema;
+- objetivos;
+- justificación;
+- resultados;
+- discusión;
+- conclusiones;
+- coherencia general;
+- cohesión entre apartados;
+- claridad argumentativa;
+- redacción académica;
+- repeticiones;
+- ambigüedades;
+- transiciones débiles.
+
+Entrega tu revisión con el encabezado:
+# Revisión editorial y de redacción
+""",
+            full_text
+        )
+
+        apa_review = run_review_agent(
+            "un revisor de formato APA 7 y estilo editorial",
+            """
+Evalúa exclusivamente el uso de citas, referencias, tablas, figuras y formato académico.
+
+Considera:
+- correspondencia entre citas y referencias;
+- suficiencia de referencias;
+- actualidad de fuentes;
+- posibles ausencias de citas;
+- tablas y figuras;
+- mención de tablas y figuras en el texto;
+- consistencia de formato APA 7;
+- errores editoriales visibles.
+
+No inventes referencias. Si no puedes verificar algo con el texto disponible, indícalo.
+
+Entrega tu revisión con el encabezado:
+# Revisión de formato, citas y referencias
+""",
+            full_text
+        )
+
+        chief_editor_prompt = f"""
+Actúa como editor en jefe de una revista científica indexada.
+
+Tienes cuatro dictámenes especializados:
+
+DICTAMEN METODOLÓGICO:
+{methodology_review}
+
+DICTAMEN TEÓRICO:
+{theoretical_review}
+
+DICTAMEN EDITORIAL:
+{editorial_review}
+
+DICTAMEN APA:
+{apa_review}
+
+Con base en ellos, elabora un dictamen final integrado en español académico.
+
+Usa esta estructura:
 
 # Observaciones generales
 
-Evalúa la estructura general del artículo:
-- Título
-- Resumen
-- Palabras clave
-- Introducción
-- Planteamiento del problema
-- Objetivos
-- Justificación
-- Marco teórico
-- Metodología
-- Resultados
-- Discusión
-- Conclusiones
-- Referencias
-- Formato APA
-- Coherencia general
-
 # Observaciones metodológicas
-
-Analiza:
-- Claridad metodológica
-- Congruencia entre objetivos, metodología y resultados
-- Tipo de estudio
-- Técnicas de recolección y análisis
-- Validez de resultados
-- Posibles sesgos
-- Limitaciones
 
 # Observaciones teóricas
 
-Analiza:
-- Sustento teórico y conceptual
-- Pertinencia y actualidad de las fuentes
-- Originalidad y aporte científico
-- Profundidad del análisis
-- Relación entre teoría y hallazgos
+# Observaciones editoriales y de redacción
 
-# Observaciones de resultados y discusión
+# Observaciones de formato APA y referencias
 
-Analiza:
-- Claridad de resultados
-- Correspondencia entre resultados, tablas, figuras y texto
-- Interpretación de hallazgos
-- Profundidad de discusión
-- Relación con objetivos
+# Tabla sintética de observaciones
 
-# Observaciones de redacción
-
-Identifica:
-- Problemas de redacción académica
-- Repeticiones
-- Ambigüedades
-- Párrafos extensos o poco claros
-- Falta de cohesión
-- Transiciones débiles
-- Posible uso artificial o excesivamente genérico del lenguaje
-
-# Observaciones de formato y referencias
-
-Analiza:
-- Uso de citas
-- Referencias
-- Cumplimiento APA 7
-- Correspondencia entre citas y referencias
-- Tablas y figuras
+Incluye una tabla en texto Markdown con columnas:
+Apartado | Problema detectado | Recomendación concreta | Prioridad
 
 # Fortalezas del artículo
 
-Menciona fortalezas concretas y específicas.
-
 # Debilidades principales
 
-Menciona debilidades relevantes que deberían corregirse.
+# Recomendaciones concretas para mejora
 
-# Recomendaciones concretas
+# Evaluación por criterios
 
-Incluye recomendaciones accionables y específicas para mejorar el manuscrito.
+Incluye una tabla en texto Markdown con columnas:
+Criterio | Valoración cualitativa | Puntuación /10
+
+Criterios:
+- Originalidad
+- Pertinencia del tema
+- Rigor metodológico
+- Sustento teórico
+- Claridad de resultados
+- Discusión
+- Redacción académica
+- Formato APA
 
 # Dictamen final
 
@@ -437,19 +513,51 @@ Incluye:
 - Nivel de aporte científico
 - Nivel de rigor metodológico
 - Nivel de claridad editorial
-- Recomendación editorial, eligiendo solo una:
+- Recomendación editorial final, eligiendo solo una:
   - Aceptado sin cambios
   - Aceptado con cambios menores
   - Requiere cambios mayores
   - Rechazado
 
-Redacta en español académico, con tono profesional y constructivo.
+Mantén un tono riguroso, constructivo, académico y humano.
 """
 
-        response = llm.invoke(review_prompt)
+        final_response = llm.invoke(chief_editor_prompt)
+
+        review = f"""
+# Dictamen académico multiagente
+
+## Agente metodológico
+
+{methodology_review}
+
+---
+
+## Agente teórico
+
+{theoretical_review}
+
+---
+
+## Agente editorial
+
+{editorial_review}
+
+---
+
+## Agente APA
+
+{apa_review}
+
+---
+
+## Dictamen consolidado del editor en jefe
+
+{final_response.content}
+"""
 
         return {
-            "review": response.content
+            "review": review
         }
 
     except Exception as e:
