@@ -34,7 +34,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 llm = ChatOpenAI(
     model="gpt-4.1-mini",
-    api_key=os.getenv("OPENAI_API_KEY")
+    api_key=os.getenv("OPENAI_API_KEY"),
 )
 
 vectorstore = None
@@ -79,7 +79,7 @@ def chat(request: ChatRequest):
 
     response = client.chat.completions.create(
         model="gpt-4.1-mini",
-        messages=conversation_history
+        messages=conversation_history,
     )
 
     assistant_response = response.choices[0].message.content
@@ -105,7 +105,7 @@ async def chat_stream(request: ChatRequest):
     stream = client.chat.completions.create(
         model="gpt-4.1-mini",
         messages=conversation_history,
-        stream=True
+        stream=True,
     )
 
     async def generate():
@@ -125,7 +125,7 @@ async def chat_stream(request: ChatRequest):
 
     return StreamingResponse(
         generate(),
-        media_type="text/plain"
+        media_type="text/plain",
     )
 
 
@@ -136,13 +136,13 @@ def summarize(request: TextRequest):
         messages=[
             {
                 "role": "system",
-                "content": "Resume el texto en máximo 5 líneas."
+                "content": "Resume el texto en máximo 5 líneas.",
             },
             {
                 "role": "user",
-                "content": request.text
+                "content": request.text,
             },
-        ]
+        ],
     )
 
     return {
@@ -157,13 +157,13 @@ def translate(request: TextRequest):
         messages=[
             {
                 "role": "system",
-                "content": "Traduce el texto al inglés."
+                "content": "Traduce el texto al inglés.",
             },
             {
                 "role": "user",
-                "content": request.text
+                "content": request.text,
             },
-        ]
+        ],
     )
 
     return {
@@ -178,13 +178,13 @@ def keywords(request: TextRequest):
         messages=[
             {
                 "role": "system",
-                "content": "Extrae de 5 a 10 palabras clave del texto."
+                "content": "Extrae de 5 a 10 palabras clave del texto.",
             },
             {
                 "role": "user",
-                "content": request.text
+                "content": request.text,
             },
-        ]
+        ],
     )
 
     return {
@@ -213,7 +213,7 @@ def upload_pdf(file: UploadFile = File(...)):
 
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
-            chunk_overlap=200
+            chunk_overlap=200,
         )
 
         chunks = text_splitter.split_documents(documents)
@@ -221,14 +221,14 @@ def upload_pdf(file: UploadFile = File(...)):
         print(f"Chunks creados: {len(chunks)}")
 
         embeddings = OpenAIEmbeddings(
-            api_key=os.getenv("OPENAI_API_KEY")
+            api_key=os.getenv("OPENAI_API_KEY"),
         )
 
         print("Embeddings inicializados")
 
         vectorstore = FAISS.from_documents(
             documents=chunks,
-            embedding=embeddings
+            embedding=embeddings,
         )
 
         print("Vectorstore FAISS creado correctamente")
@@ -237,7 +237,7 @@ def upload_pdf(file: UploadFile = File(...)):
             "message": "PDF cargado correctamente",
             "filename": file.filename,
             "pages": len(documents),
-            "chunks": len(chunks)
+            "chunks": len(chunks),
         }
 
     except Exception as e:
@@ -247,7 +247,7 @@ def upload_pdf(file: UploadFile = File(...)):
             status_code=500,
             content={
                 "error": str(e)
-            }
+            },
         )
 
 
@@ -261,12 +261,12 @@ def ask_pdf(request: PDFQuestionRequest):
                 status_code=400,
                 content={
                     "error": "Primero debes subir un PDF"
-                }
+                },
             )
 
         results = vectorstore.similarity_search(
             request.question,
-            k=3
+            k=3,
         )
 
         context = "\n\n".join([
@@ -294,10 +294,10 @@ Pregunta:
             "sources": [
                 {
                     "page": doc.metadata.get("page"),
-                    "content": doc.page_content[:300]
+                    "content": doc.page_content[:300],
                 }
                 for doc in results
-            ]
+            ],
         }
 
     except Exception as e:
@@ -307,28 +307,8 @@ Pregunta:
             status_code=500,
             content={
                 "error": str(e)
-            }
+            },
         )
-
-
-def run_review_agent(agent_name: str, instructions: str, article_text: str):
-    prompt = f"""
-Actúa como {agent_name}.
-
-{instructions}
-
-Analiza el siguiente artículo científico:
-
-{article_text}
-
-Redacta observaciones académicas profundas, específicas, constructivas y útiles.
-Evita comentarios genéricos. Señala problemas, justifica por qué deben corregirse
-y propone mejoras concretas.
-"""
-
-    response = llm.invoke(prompt)
-
-    return response.content
 
 
 @app.post("/review-article")
@@ -341,27 +321,52 @@ def review_article():
                 status_code=400,
                 content={
                     "error": "Primero debes subir un artículo en PDF"
-                }
+                },
             )
 
         full_text = "\n\n".join([
             doc.page_content for doc in uploaded_documents
         ])
 
-        max_chars = 35000
+        max_chars = 30000
 
         if len(full_text) > max_chars:
             full_text = full_text[:max_chars]
 
-        methodology_review = run_review_agent(
-            "un revisor metodológico experto",
-            """
-Evalúa exclusivamente el rigor metodológico del artículo.
+        review_prompt = f"""
+Eres un sistema multiagente de revisión académica para artículos científicos.
 
-Considera:
-- claridad del diseño metodológico;
+Simula la participación coordinada de los siguientes agentes especializados:
+
+1. Agente metodológico
+2. Agente teórico
+3. Agente editorial y de redacción
+4. Agente APA y formato
+5. Editor en jefe
+
+Tu función es elaborar un dictamen académico riguroso, crítico, objetivo,
+constructivo y útil para mejorar la calidad científica, metodológica, teórica
+y editorial del manuscrito.
+
+Mantén un tono profesional, académico y humano. Evita frases genéricas,
+superficiales o excesivamente duras.
+
+Analiza el siguiente artículo científico:
+
+ARTÍCULO:
+{full_text}
+
+Genera el dictamen con esta estructura exacta:
+
+# Dictamen académico multiagente
+
+## 1. Revisión del agente metodológico
+
+Evalúa:
+- claridad del problema de investigación;
+- diseño metodológico;
+- congruencia entre objetivos, metodología y resultados;
 - tipo de estudio;
-- congruencia entre objetivos, método y resultados;
 - población, muestra o corpus;
 - técnicas de recolección de datos;
 - técnicas de análisis;
@@ -370,39 +375,25 @@ Considera:
 - posibles sesgos;
 - suficiencia de la explicación metodológica.
 
-Entrega tu revisión con el encabezado:
-# Revisión metodológica
-""",
-            full_text
-        )
+Incluye observaciones específicas y recomendaciones concretas.
 
-        theoretical_review = run_review_agent(
-            "un revisor teórico experto",
-            """
-Evalúa exclusivamente la dimensión teórica y conceptual del artículo.
+## 2. Revisión del agente teórico
 
-Considera:
+Evalúa:
 - pertinencia del marco teórico;
 - actualidad de la literatura;
 - profundidad conceptual;
-- claridad de categorías o variables;
+- claridad de categorías, variables o constructos;
 - relación entre teoría, problema y hallazgos;
-- originalidad del aporte;
-- diálogo con literatura reciente;
-- solidez argumentativa.
+- originalidad;
+- aporte científico;
+- diálogo con literatura reciente.
 
-Entrega tu revisión con el encabezado:
-# Revisión teórica
-""",
-            full_text
-        )
+Incluye observaciones específicas y recomendaciones concretas.
 
-        editorial_review = run_review_agent(
-            "un revisor editorial académico",
-            """
-Evalúa exclusivamente la estructura, redacción y coherencia editorial del manuscrito.
+## 3. Revisión del agente editorial y de redacción
 
-Considera:
+Evalúa:
 - título;
 - resumen;
 - palabras clave;
@@ -419,82 +410,38 @@ Considera:
 - redacción académica;
 - repeticiones;
 - ambigüedades;
-- transiciones débiles.
+- transiciones débiles;
+- posible redacción artificial o excesivamente genérica.
 
-Entrega tu revisión con el encabezado:
-# Revisión editorial y de redacción
-""",
-            full_text
-        )
+Incluye observaciones específicas y recomendaciones concretas.
 
-        apa_review = run_review_agent(
-            "un revisor de formato APA 7 y estilo editorial",
-            """
-Evalúa exclusivamente el uso de citas, referencias, tablas, figuras y formato académico.
+## 4. Revisión del agente APA y formato
 
-Considera:
+Evalúa:
+- uso de citas;
 - correspondencia entre citas y referencias;
-- suficiencia de referencias;
-- actualidad de fuentes;
-- posibles ausencias de citas;
-- tablas y figuras;
+- suficiencia y actualidad de referencias;
+- formato APA 7;
+- tablas;
+- figuras;
 - mención de tablas y figuras en el texto;
-- consistencia de formato APA 7;
-- errores editoriales visibles.
+- consistencia editorial.
 
 No inventes referencias. Si no puedes verificar algo con el texto disponible, indícalo.
 
-Entrega tu revisión con el encabezado:
-# Revisión de formato, citas y referencias
-""",
-            full_text
-        )
+## 5. Tabla sintética de observaciones
 
-        chief_editor_prompt = f"""
-Actúa como editor en jefe de una revista científica indexada.
+Incluye una tabla Markdown con columnas:
 
-Tienes cuatro dictámenes especializados:
-
-DICTAMEN METODOLÓGICO:
-{methodology_review}
-
-DICTAMEN TEÓRICO:
-{theoretical_review}
-
-DICTAMEN EDITORIAL:
-{editorial_review}
-
-DICTAMEN APA:
-{apa_review}
-
-Con base en ellos, elabora un dictamen final integrado en español académico.
-
-Usa esta estructura:
-
-# Observaciones generales
-
-# Observaciones metodológicas
-
-# Observaciones teóricas
-
-# Observaciones editoriales y de redacción
-
-# Observaciones de formato APA y referencias
-
-# Tabla sintética de observaciones
-
-Incluye una tabla en texto Markdown con columnas:
 Apartado | Problema detectado | Recomendación concreta | Prioridad
 
-# Fortalezas del artículo
+La prioridad debe ser:
+Alta, Media o Baja.
 
-# Debilidades principales
+## 6. Evaluación por criterios
 
-# Recomendaciones concretas para mejora
+Incluye una tabla Markdown con columnas:
 
-# Evaluación por criterios
-
-Incluye una tabla en texto Markdown con columnas:
 Criterio | Valoración cualitativa | Puntuación /10
 
 Criterios:
@@ -507,7 +454,19 @@ Criterios:
 - Redacción académica
 - Formato APA
 
-# Dictamen final
+## 7. Fortalezas del artículo
+
+Menciona fortalezas concretas y específicas.
+
+## 8. Debilidades principales
+
+Menciona debilidades relevantes que deberían corregirse.
+
+## 9. Recomendaciones concretas para mejora
+
+Incluye recomendaciones accionables y específicas.
+
+## 10. Dictamen final del editor en jefe
 
 Incluye:
 - Nivel de aporte científico
@@ -519,45 +478,13 @@ Incluye:
   - Requiere cambios mayores
   - Rechazado
 
-Mantén un tono riguroso, constructivo, académico y humano.
+Redacta todo en español académico.
 """
 
-        final_response = llm.invoke(chief_editor_prompt)
-
-        review = f"""
-# Dictamen académico multiagente
-
-## Agente metodológico
-
-{methodology_review}
-
----
-
-## Agente teórico
-
-{theoretical_review}
-
----
-
-## Agente editorial
-
-{editorial_review}
-
----
-
-## Agente APA
-
-{apa_review}
-
----
-
-## Dictamen consolidado del editor en jefe
-
-{final_response.content}
-"""
+        response = llm.invoke(review_prompt)
 
         return {
-            "review": review
+            "review": response.content
         }
 
     except Exception as e:
@@ -567,5 +494,5 @@ Mantén un tono riguroso, constructivo, académico y humano.
             status_code=500,
             content={
                 "error": str(e)
-            }
+            },
         )
