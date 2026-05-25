@@ -38,6 +38,7 @@ llm = ChatOpenAI(
 )
 
 vectorstore = None
+uploaded_documents = []
 
 conversation_history = [
     {
@@ -193,7 +194,7 @@ def keywords(request: TextRequest):
 
 @app.post("/upload-pdf")
 def upload_pdf(file: UploadFile = File(...)):
-    global vectorstore
+    global vectorstore, uploaded_documents
 
     try:
         file_path = f"uploaded_{file.filename}"
@@ -205,6 +206,8 @@ def upload_pdf(file: UploadFile = File(...)):
 
         loader = PyPDFLoader(file_path)
         documents = loader.load()
+
+        uploaded_documents = documents
 
         print(f"Páginas cargadas: {len(documents)}")
 
@@ -295,6 +298,158 @@ Pregunta:
                 }
                 for doc in results
             ]
+        }
+
+    except Exception as e:
+        traceback.print_exc()
+
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": str(e)
+            }
+        )
+
+
+@app.post("/review-article")
+def review_article():
+    global uploaded_documents
+
+    try:
+        if not uploaded_documents:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "Primero debes subir un artículo en PDF"
+                }
+            )
+
+        full_text = "\n\n".join([
+            doc.page_content for doc in uploaded_documents
+        ])
+
+        max_chars = 45000
+
+        if len(full_text) > max_chars:
+            full_text = full_text[:max_chars]
+
+        review_prompt = f"""
+Eres un revisor académico experto de artículos científicos con experiencia en publicación,
+arbitraje y evaluación editorial en revistas indexadas nacionales e internacionales.
+
+Tu función es actuar como un dictaminador riguroso, crítico, objetivo y constructivo,
+proporcionando observaciones detalladas que permitan fortalecer la calidad científica,
+metodológica, teórica y editorial del manuscrito evaluado.
+
+Mantén un tono profesional, académico y humano. Evita frases genéricas, superficiales
+o excesivamente duras. Señala fortalezas, áreas de mejora y recomendaciones concretas.
+
+Analiza el siguiente artículo científico:
+
+ARTÍCULO:
+{full_text}
+
+Elabora una revisión académica profesional con esta estructura:
+
+# Observaciones generales
+
+Evalúa la estructura general del artículo:
+- Título
+- Resumen
+- Palabras clave
+- Introducción
+- Planteamiento del problema
+- Objetivos
+- Justificación
+- Marco teórico
+- Metodología
+- Resultados
+- Discusión
+- Conclusiones
+- Referencias
+- Formato APA
+- Coherencia general
+
+# Observaciones metodológicas
+
+Analiza:
+- Claridad metodológica
+- Congruencia entre objetivos, metodología y resultados
+- Tipo de estudio
+- Técnicas de recolección y análisis
+- Validez de resultados
+- Posibles sesgos
+- Limitaciones
+
+# Observaciones teóricas
+
+Analiza:
+- Sustento teórico y conceptual
+- Pertinencia y actualidad de las fuentes
+- Originalidad y aporte científico
+- Profundidad del análisis
+- Relación entre teoría y hallazgos
+
+# Observaciones de resultados y discusión
+
+Analiza:
+- Claridad de resultados
+- Correspondencia entre resultados, tablas, figuras y texto
+- Interpretación de hallazgos
+- Profundidad de discusión
+- Relación con objetivos
+
+# Observaciones de redacción
+
+Identifica:
+- Problemas de redacción académica
+- Repeticiones
+- Ambigüedades
+- Párrafos extensos o poco claros
+- Falta de cohesión
+- Transiciones débiles
+- Posible uso artificial o excesivamente genérico del lenguaje
+
+# Observaciones de formato y referencias
+
+Analiza:
+- Uso de citas
+- Referencias
+- Cumplimiento APA 7
+- Correspondencia entre citas y referencias
+- Tablas y figuras
+
+# Fortalezas del artículo
+
+Menciona fortalezas concretas y específicas.
+
+# Debilidades principales
+
+Menciona debilidades relevantes que deberían corregirse.
+
+# Recomendaciones concretas
+
+Incluye recomendaciones accionables y específicas para mejorar el manuscrito.
+
+# Dictamen final
+
+Incluye:
+- Nivel de aporte científico
+- Nivel de rigor metodológico
+- Nivel de claridad editorial
+- Recomendación editorial, eligiendo solo una:
+  - Aceptado sin cambios
+  - Aceptado con cambios menores
+  - Requiere cambios mayores
+  - Rechazado
+
+Redacta en español académico, con tono profesional y constructivo.
+"""
+
+        response = llm.invoke(review_prompt)
+
+        return {
+            "review": response.content
         }
 
     except Exception as e:
