@@ -1,12 +1,15 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from openai import OpenAI
 from dotenv import load_dotenv
 from pydantic import BaseModel
 import os
 import shutil
 import traceback
+from datetime import datetime
+
+from docx import Document
 
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -39,6 +42,7 @@ llm = ChatOpenAI(
 
 vectorstore = None
 uploaded_documents = []
+last_article_review = ""
 
 conversation_history = [
     {
@@ -65,17 +69,12 @@ class PDFQuestionRequest(BaseModel):
 
 @app.get("/")
 def home():
-    return {
-        "message": "AI Chat API funcionando correctamente"
-    }
+    return {"message": "AI Chat API funcionando correctamente"}
 
 
 @app.post("/chat")
 def chat(request: ChatRequest):
-    conversation_history.append({
-        "role": "user",
-        "content": request.prompt
-    })
+    conversation_history.append({"role": "user", "content": request.prompt})
 
     response = client.chat.completions.create(
         model="gpt-4.1-mini",
@@ -97,10 +96,7 @@ def chat(request: ChatRequest):
 
 @app.post("/chat-stream")
 async def chat_stream(request: ChatRequest):
-    conversation_history.append({
-        "role": "user",
-        "content": request.prompt
-    })
+    conversation_history.append({"role": "user", "content": request.prompt})
 
     stream = client.chat.completions.create(
         model="gpt-4.1-mini",
@@ -123,10 +119,7 @@ async def chat_stream(request: ChatRequest):
             "content": full_response
         })
 
-    return StreamingResponse(
-        generate(),
-        media_type="text/plain",
-    )
+    return StreamingResponse(generate(), media_type="text/plain")
 
 
 @app.post("/summarize")
@@ -134,20 +127,12 @@ def summarize(request: TextRequest):
     response = client.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[
-            {
-                "role": "system",
-                "content": "Resume el texto en máximo 5 líneas.",
-            },
-            {
-                "role": "user",
-                "content": request.text,
-            },
+            {"role": "system", "content": "Resume el texto en máximo 5 líneas."},
+            {"role": "user", "content": request.text},
         ],
     )
 
-    return {
-        "summary": response.choices[0].message.content
-    }
+    return {"summary": response.choices[0].message.content}
 
 
 @app.post("/translate")
@@ -155,20 +140,12 @@ def translate(request: TextRequest):
     response = client.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[
-            {
-                "role": "system",
-                "content": "Traduce el texto al inglés.",
-            },
-            {
-                "role": "user",
-                "content": request.text,
-            },
+            {"role": "system", "content": "Traduce el texto al inglés."},
+            {"role": "user", "content": request.text},
         ],
     )
 
-    return {
-        "translation": response.choices[0].message.content
-    }
+    return {"translation": response.choices[0].message.content}
 
 
 @app.post("/keywords")
@@ -176,25 +153,17 @@ def keywords(request: TextRequest):
     response = client.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[
-            {
-                "role": "system",
-                "content": "Extrae de 5 a 10 palabras clave del texto.",
-            },
-            {
-                "role": "user",
-                "content": request.text,
-            },
+            {"role": "system", "content": "Extrae de 5 a 10 palabras clave del texto."},
+            {"role": "user", "content": request.text},
         ],
     )
 
-    return {
-        "keywords": response.choices[0].message.content
-    }
+    return {"keywords": response.choices[0].message.content}
 
 
 @app.post("/upload-pdf")
 def upload_pdf(file: UploadFile = File(...)):
-    global vectorstore, uploaded_documents
+    global vectorstore, uploaded_documents, last_article_review
 
     try:
         file_path = f"uploaded_{file.filename}"
@@ -202,14 +171,11 @@ def upload_pdf(file: UploadFile = File(...)):
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
-        print(f"PDF guardado: {file_path}")
-
         loader = PyPDFLoader(file_path)
         documents = loader.load()
 
         uploaded_documents = documents
-
-        print(f"Páginas cargadas: {len(documents)}")
+        last_article_review = ""
 
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
@@ -218,20 +184,14 @@ def upload_pdf(file: UploadFile = File(...)):
 
         chunks = text_splitter.split_documents(documents)
 
-        print(f"Chunks creados: {len(chunks)}")
-
         embeddings = OpenAIEmbeddings(
             api_key=os.getenv("OPENAI_API_KEY"),
         )
-
-        print("Embeddings inicializados")
 
         vectorstore = FAISS.from_documents(
             documents=chunks,
             embedding=embeddings,
         )
-
-        print("Vectorstore FAISS creado correctamente")
 
         return {
             "message": "PDF cargado correctamente",
@@ -245,9 +205,7 @@ def upload_pdf(file: UploadFile = File(...)):
 
         return JSONResponse(
             status_code=500,
-            content={
-                "error": str(e)
-            },
+            content={"error": str(e)},
         )
 
 
@@ -259,9 +217,7 @@ def ask_pdf(request: PDFQuestionRequest):
         if vectorstore is None:
             return JSONResponse(
                 status_code=400,
-                content={
-                    "error": "Primero debes subir un PDF"
-                },
+                content={"error": "Primero debes subir un PDF"},
             )
 
         results = vectorstore.similarity_search(
@@ -269,9 +225,7 @@ def ask_pdf(request: PDFQuestionRequest):
             k=3,
         )
 
-        context = "\n\n".join([
-            doc.page_content for doc in results
-        ])
+        context = "\n\n".join([doc.page_content for doc in results])
 
         prompt = f"""
 Responde usando únicamente la información del contexto.
@@ -305,28 +259,22 @@ Pregunta:
 
         return JSONResponse(
             status_code=500,
-            content={
-                "error": str(e)
-            },
+            content={"error": str(e)},
         )
 
 
 @app.post("/review-article")
 def review_article():
-    global uploaded_documents
+    global uploaded_documents, last_article_review
 
     try:
         if not uploaded_documents:
             return JSONResponse(
                 status_code=400,
-                content={
-                    "error": "Primero debes subir un artículo en PDF"
-                },
+                content={"error": "Primero debes subir un artículo en PDF"},
             )
 
-        full_text = "\n\n".join([
-            doc.page_content for doc in uploaded_documents
-        ])
+        full_text = "\n\n".join([doc.page_content for doc in uploaded_documents])
 
         max_chars = 30000
 
@@ -483,16 +431,76 @@ Redacta todo en español académico.
 
         response = llm.invoke(review_prompt)
 
-        return {
-            "review": response.content
-        }
+        last_article_review = response.content
+
+        return {"review": last_article_review}
 
     except Exception as e:
         traceback.print_exc()
 
         return JSONResponse(
             status_code=500,
-            content={
-                "error": str(e)
-            },
+            content={"error": str(e)},
+        )
+
+
+@app.post("/export-review")
+def export_review():
+    global last_article_review
+
+    try:
+        if not last_article_review:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Primero debes generar un dictamen académico"},
+            )
+
+        document = Document()
+
+        document.add_heading("Dictamen académico de artículo científico", level=1)
+
+        document.add_paragraph(
+            f"Fecha de generación: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+        )
+
+        document.add_paragraph("")
+
+        for line in last_article_review.split("\n"):
+            clean_line = line.strip()
+
+            if not clean_line:
+                document.add_paragraph("")
+                continue
+
+            if clean_line.startswith("# "):
+                document.add_heading(clean_line.replace("# ", ""), level=1)
+
+            elif clean_line.startswith("## "):
+                document.add_heading(clean_line.replace("## ", ""), level=2)
+
+            elif clean_line.startswith("### "):
+                document.add_heading(clean_line.replace("### ", ""), level=3)
+
+            elif clean_line.startswith("- "):
+                document.add_paragraph(clean_line.replace("- ", ""), style="List Bullet")
+
+            else:
+                document.add_paragraph(clean_line)
+
+        file_path = "dictamen_academico.docx"
+
+        document.save(file_path)
+
+        return FileResponse(
+            path=file_path,
+            filename="dictamen_academico.docx",
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+    except Exception as e:
+        traceback.print_exc()
+
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)},
         )
