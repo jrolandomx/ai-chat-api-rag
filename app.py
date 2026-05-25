@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from openai import OpenAI
@@ -7,9 +7,13 @@ from pydantic import BaseModel
 import os
 import shutil
 import traceback
+import re
 from datetime import datetime
 
 from docx import Document
+
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
 
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -69,7 +73,7 @@ class PDFQuestionRequest(BaseModel):
 
 @app.get("/")
 def home():
-    return {"message": "AI Chat API funcionando correctamente"}
+    return {"message": "AI Academic Reviewer API funcionando correctamente"}
 
 
 @app.post("/chat")
@@ -83,14 +87,13 @@ def chat(request: ChatRequest):
 
     assistant_response = response.choices[0].message.content
 
-    conversation_history.append({
-        "role": "assistant",
-        "content": assistant_response
-    })
+    conversation_history.append(
+        {"role": "assistant", "content": assistant_response}
+    )
 
     return {
         "response": assistant_response,
-        "history": conversation_history
+        "history": conversation_history,
     }
 
 
@@ -114,10 +117,9 @@ async def chat_stream(request: ChatRequest):
                 full_response += content
                 yield content
 
-        conversation_history.append({
-            "role": "assistant",
-            "content": full_response
-        })
+        conversation_history.append(
+            {"role": "assistant", "content": full_response}
+        )
 
     return StreamingResponse(generate(), media_type="text/plain")
 
@@ -153,7 +155,10 @@ def keywords(request: TextRequest):
     response = client.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[
-            {"role": "system", "content": "Extrae de 5 a 10 palabras clave del texto."},
+            {
+                "role": "system",
+                "content": "Extrae de 5 a 10 palabras clave del texto.",
+            },
             {"role": "user", "content": request.text},
         ],
     )
@@ -220,10 +225,7 @@ def ask_pdf(request: PDFQuestionRequest):
                 content={"error": "Primero debes subir un PDF"},
             )
 
-        results = vectorstore.similarity_search(
-            request.question,
-            k=3,
-        )
+        results = vectorstore.similarity_search(request.question, k=3)
 
         context = "\n\n".join([doc.page_content for doc in results])
 
@@ -263,18 +265,43 @@ Pregunta:
         )
 
 
+def blind_review_text(text: str):
+    patterns = [
+        r"(?i)autor[a-z]*:.*",
+        r"(?i)authors?:.*",
+        r"(?i)afiliaci[oó]n:.*",
+        r"(?i)universidad.*",
+        r"(?i)correo.*",
+        r"(?i)e-mail.*",
+        r"(?i)email.*",
+        r"(?i)orcid.*",
+        r"(?i)agradecimientos.*",
+    ]
+
+    for pattern in patterns:
+        text = re.sub(pattern, "[DATOS OCULTOS PARA REVISIÓN CIEGA]", text)
+
+    return text
+
+
 @app.post("/review-article")
-def review_article():
+def review_article(
+    review_type: str = Form("Scopus"),
+    blind_review: bool = Form(True),
+):
     global uploaded_documents, last_article_review
 
     try:
         if not uploaded_documents:
             return JSONResponse(
                 status_code=400,
-                content={"error": "Primero debes subir un artículo en PDF"},
+                content={"error": "Primero debes subir un artículo PDF"},
             )
 
         full_text = "\n\n".join([doc.page_content for doc in uploaded_documents])
+
+        if blind_review:
+            full_text = blind_review_text(full_text)
 
         max_chars = 30000
 
@@ -282,14 +309,17 @@ def review_article():
             full_text = full_text[:max_chars]
 
         review_prompt = f"""
-Eres un sistema multiagente de revisión académica para artículos científicos.
+Eres un sistema multiagente de arbitraje académico especializado en evaluación científica.
 
-Simula la participación coordinada de los siguientes agentes especializados:
+Tipo de evaluación:
+{review_type}
 
-1. Agente metodológico
-2. Agente teórico
-3. Agente editorial y de redacción
-4. Agente APA y formato
+Debes actuar simultáneamente como:
+
+1. Revisor metodológico
+2. Revisor teórico
+3. Revisor editorial y de redacción
+4. Revisor APA y formato
 5. Editor en jefe
 
 Tu función es elaborar un dictamen académico riguroso, crítico, objetivo,
@@ -308,7 +338,29 @@ Genera el dictamen con esta estructura exacta:
 
 # Dictamen académico multiagente
 
-## 1. Revisión del agente metodológico
+## Badge de dictamen editorial
+
+Indica SOLO UNA opción:
+- Aceptado sin cambios
+- Aceptado con cambios menores
+- Requiere cambios mayores
+- Rechazado
+
+## Score general del artículo
+
+Genera tabla markdown:
+
+| Criterio | Score |
+|---|---|
+| Originalidad | X/10 |
+| Metodología | X/10 |
+| Marco teórico | X/10 |
+| Redacción | X/10 |
+| Resultados | X/10 |
+| Discusión | X/10 |
+| APA | X/10 |
+
+## Revisión metodológica
 
 Evalúa:
 - claridad del problema de investigación;
@@ -325,7 +377,7 @@ Evalúa:
 
 Incluye observaciones específicas y recomendaciones concretas.
 
-## 2. Revisión del agente teórico
+## Revisión teórica
 
 Evalúa:
 - pertinencia del marco teórico;
@@ -339,7 +391,7 @@ Evalúa:
 
 Incluye observaciones específicas y recomendaciones concretas.
 
-## 3. Revisión del agente editorial y de redacción
+## Revisión editorial y de redacción
 
 Evalúa:
 - título;
@@ -363,7 +415,7 @@ Evalúa:
 
 Incluye observaciones específicas y recomendaciones concretas.
 
-## 4. Revisión del agente APA y formato
+## Revisión APA y formato
 
 Evalúa:
 - uso de citas;
@@ -377,20 +429,25 @@ Evalúa:
 
 No inventes referencias. Si no puedes verificar algo con el texto disponible, indícalo.
 
-## 5. Tabla sintética de observaciones
+## Tabla sintética de observaciones
 
-Incluye una tabla Markdown con columnas:
+Genera tabla markdown:
 
-Apartado | Problema detectado | Recomendación concreta | Prioridad
+| Apartado | Problema | Recomendación | Prioridad |
+|---|---|---|---|
 
-La prioridad debe ser:
-Alta, Media o Baja.
+## Fortalezas
 
-## 6. Evaluación por criterios
+## Debilidades
 
-Incluye una tabla Markdown con columnas:
+## Recomendaciones concretas
 
-Criterio | Valoración cualitativa | Puntuación /10
+## Evaluación por criterios
+
+Genera tabla markdown:
+
+| Criterio | Valoración cualitativa | Puntuación /10 |
+|---|---|---|
 
 Criterios:
 - Originalidad
@@ -402,19 +459,7 @@ Criterios:
 - Redacción académica
 - Formato APA
 
-## 7. Fortalezas del artículo
-
-Menciona fortalezas concretas y específicas.
-
-## 8. Debilidades principales
-
-Menciona debilidades relevantes que deberían corregirse.
-
-## 9. Recomendaciones concretas para mejora
-
-Incluye recomendaciones accionables y específicas.
-
-## 10. Dictamen final del editor en jefe
+## Dictamen final del editor en jefe
 
 Incluye:
 - Nivel de aporte científico
@@ -446,6 +491,11 @@ Redacta todo en español académico.
 
 @app.post("/export-review")
 def export_review():
+    return export_review_word()
+
+
+@app.post("/export-review-word")
+def export_review_word():
     global last_article_review
 
     try:
@@ -482,7 +532,10 @@ def export_review():
                 document.add_heading(clean_line.replace("### ", ""), level=3)
 
             elif clean_line.startswith("- "):
-                document.add_paragraph(clean_line.replace("- ", ""), style="List Bullet")
+                document.add_paragraph(
+                    clean_line.replace("- ", ""),
+                    style="List Bullet",
+                )
 
             else:
                 document.add_paragraph(clean_line)
@@ -494,7 +547,71 @@ def export_review():
         return FileResponse(
             path=file_path,
             filename="dictamen_academico.docx",
-            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            media_type=(
+                "application/vnd.openxmlformats-officedocument."
+                "wordprocessingml.document"
+            ),
+        )
+
+    except Exception as e:
+        traceback.print_exc()
+
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)},
+        )
+
+
+@app.post("/export-review-pdf")
+def export_review_pdf():
+    global last_article_review
+
+    try:
+        if not last_article_review:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Primero debes generar un dictamen académico"},
+            )
+
+        file_path = "dictamen_academico.pdf"
+
+        doc = SimpleDocTemplate(file_path)
+        styles = getSampleStyleSheet()
+        elements = []
+
+        elements.append(
+            Paragraph("Dictamen académico de artículo científico", styles["Heading1"])
+        )
+        elements.append(Spacer(1, 12))
+
+        elements.append(
+            Paragraph(
+                f"Fecha de generación: {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+                styles["BodyText"],
+            )
+        )
+        elements.append(Spacer(1, 12))
+
+        for line in last_article_review.split("\n"):
+            clean_line = line.strip()
+
+            if not clean_line:
+                elements.append(Spacer(1, 8))
+                continue
+
+            clean_line = clean_line.replace("#", "")
+
+            elements.append(
+                Paragraph(clean_line, styles["BodyText"])
+            )
+            elements.append(Spacer(1, 8))
+
+        doc.build(elements)
+
+        return FileResponse(
+            path=file_path,
+            filename="dictamen_academico.pdf",
+            media_type="application/pdf",
         )
 
     except Exception as e:

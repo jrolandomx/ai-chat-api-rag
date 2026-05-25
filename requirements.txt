@@ -11,3 +11,4 @@ langchain-text-splitters
 faiss-cpu
 pypdf
 python-docx
+reportlab
