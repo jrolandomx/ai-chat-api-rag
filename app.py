@@ -255,12 +255,16 @@ def ask_pdf(request: PDFQuestionRequest):
 
     try:
         if vectorstore is None:
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "error": "Primero debes subir un PDF"
-                }
+            embeddings = OpenAIEmbeddings(
+                api_key=os.getenv("OPENAI_API_KEY")
             )
+
+            vectorstore = Chroma(
+                persist_directory="./chroma_db",
+                embedding_function=embeddings
+            )
+
+            print("Vectorstore recuperado desde disco")
 
         results = vectorstore.similarity_search(
             request.question,
