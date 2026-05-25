@@ -17,15 +17,12 @@ load_dotenv()
 
 app = FastAPI()
 
-# =========================
-# CORS
-# =========================
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "https://ai-chat-frontend-one.vercel.app",
         "https://ai-chat-frontend-h92larnka-jrolandomxs-projects.vercel.app",
     ],
     allow_credentials=True,
@@ -33,22 +30,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# =========================
-# OPENAI
-# =========================
-
-client = OpenAI(
-    api_key=os.getenv("OPENAI_API_KEY")
-)
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 llm = ChatOpenAI(
     model="gpt-4.1-mini",
     api_key=os.getenv("OPENAI_API_KEY")
 )
-
-# =========================
-# GLOBALS
-# =========================
 
 vectorstore = None
 
@@ -62,9 +49,6 @@ conversation_history = [
     }
 ]
 
-# =========================
-# MODELS
-# =========================
 
 class ChatRequest(BaseModel):
     prompt: str
@@ -78,10 +62,6 @@ class PDFQuestionRequest(BaseModel):
     question: str
 
 
-# =========================
-# ROOT
-# =========================
-
 @app.get("/")
 def home():
     return {
@@ -89,13 +69,8 @@ def home():
     }
 
 
-# =========================
-# NORMAL CHAT
-# =========================
-
 @app.post("/chat")
 def chat(request: ChatRequest):
-
     conversation_history.append({
         "role": "user",
         "content": request.prompt
@@ -119,13 +94,8 @@ def chat(request: ChatRequest):
     }
 
 
-# =========================
-# STREAMING CHAT
-# =========================
-
 @app.post("/chat-stream")
 async def chat_stream(request: ChatRequest):
-
     conversation_history.append({
         "role": "user",
         "content": request.prompt
@@ -138,17 +108,13 @@ async def chat_stream(request: ChatRequest):
     )
 
     async def generate():
-
         full_response = ""
 
         for chunk in stream:
-
             content = chunk.choices[0].delta.content
 
             if content:
-
                 full_response += content
-
                 yield content
 
         conversation_history.append({
@@ -162,13 +128,8 @@ async def chat_stream(request: ChatRequest):
     )
 
 
-# =========================
-# SUMMARIZE
-# =========================
-
 @app.post("/summarize")
 def summarize(request: TextRequest):
-
     response = client.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[
@@ -188,13 +149,8 @@ def summarize(request: TextRequest):
     }
 
 
-# =========================
-# TRANSLATE
-# =========================
-
 @app.post("/translate")
 def translate(request: TextRequest):
-
     response = client.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[
@@ -214,13 +170,8 @@ def translate(request: TextRequest):
     }
 
 
-# =========================
-# KEYWORDS
-# =========================
-
 @app.post("/keywords")
 def keywords(request: TextRequest):
-
     response = client.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[
@@ -240,13 +191,8 @@ def keywords(request: TextRequest):
     }
 
 
-# =========================
-# UPLOAD PDF
-# =========================
-
 @app.post("/upload-pdf")
 def upload_pdf(file: UploadFile = File(...)):
-
     global vectorstore
 
     try:
@@ -293,7 +239,6 @@ def upload_pdf(file: UploadFile = File(...)):
         }
 
     except Exception as e:
-
         traceback.print_exc()
 
         return JSONResponse(
@@ -304,13 +249,8 @@ def upload_pdf(file: UploadFile = File(...)):
         )
 
 
-# =========================
-# ASK PDF
-# =========================
-
 @app.post("/ask-pdf")
 def ask_pdf(request: PDFQuestionRequest):
-
     global vectorstore
 
     try:
@@ -359,7 +299,6 @@ Pregunta:
         }
 
     except Exception as e:
-
         traceback.print_exc()
 
         return JSONResponse(
