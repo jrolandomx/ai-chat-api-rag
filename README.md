@@ -51,3 +51,20 @@ ai-chat-api/
 ├── .gitignore
 ├── README.md
 └── .env
+
+## Live Demo
+
+Frontend:
+https://ai-chat-frontend-one.vercel.app
+
+Backend API:
+https://ai-chat-api-rag.onrender.com
+
+## Architecture
+
+- Frontend: Next.js + Vercel
+- Backend: FastAPI + Render
+- LLM: OpenAI GPT-4.1-mini
+- Embeddings: OpenAI Embeddings
+- Vector Store: FAISS
+- Retrieval: LangChain RAG Pipeline
