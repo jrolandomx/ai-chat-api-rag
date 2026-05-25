@@ -1,11 +1,12 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from openai import OpenAI
 from dotenv import load_dotenv
 from pydantic import BaseModel
 import os
 import shutil
+import traceback
 
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -25,7 +26,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://127.0.0.1:3000",
-        "https://ai-chat-frontend-h92larnka-jrolandomxs-projects.vercel.app"
+        "https://ai-chat-frontend-h92larnka-jrolandomxs-projects.vercel.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -57,7 +58,7 @@ conversation_history = [
         "content": (
             "Eres un asistente académico y técnico. "
             "Respondes de manera clara, breve y paso a paso."
-        )
+        ),
     }
 ]
 
@@ -178,7 +179,7 @@ def summarize(request: TextRequest):
             {
                 "role": "user",
                 "content": request.text
-            }
+            },
         ]
     )
 
@@ -204,7 +205,7 @@ def translate(request: TextRequest):
             {
                 "role": "user",
                 "content": request.text
-            }
+            },
         ]
     )
 
@@ -230,7 +231,7 @@ def keywords(request: TextRequest):
             {
                 "role": "user",
                 "content": request.text
-            }
+            },
         ]
     )
 
@@ -249,15 +250,17 @@ def upload_pdf(file: UploadFile = File(...)):
     global vectorstore
 
     try:
-
         file_path = f"uploaded_{file.filename}"
 
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
-        loader = PyPDFLoader(file_path)
+        print(f"PDF guardado: {file_path}")
 
+        loader = PyPDFLoader(file_path)
         documents = loader.load()
+
+        print(f"Páginas cargadas: {len(documents)}")
 
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
@@ -266,14 +269,21 @@ def upload_pdf(file: UploadFile = File(...)):
 
         chunks = text_splitter.split_documents(documents)
 
+        print(f"Chunks creados: {len(chunks)}")
+
         embeddings = OpenAIEmbeddings(
             api_key=os.getenv("OPENAI_API_KEY")
         )
 
+        print("Embeddings inicializados")
+
         vectorstore = Chroma.from_documents(
             documents=chunks,
-            embedding=embeddings
+            embedding=embeddings,
+            persist_directory="./chroma_db"
         )
+
+        print("Vectorstore creado correctamente")
 
         return {
             "message": "PDF cargado correctamente",
@@ -284,9 +294,14 @@ def upload_pdf(file: UploadFile = File(...)):
 
     except Exception as e:
 
-        return {
-            "error": str(e)
-        }
+        traceback.print_exc()
+
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": str(e)
+            }
+        )
 
 
 # =========================
@@ -299,11 +314,13 @@ def ask_pdf(request: PDFQuestionRequest):
     global vectorstore
 
     try:
-
         if vectorstore is None:
-            return {
-                "error": "Primero debes subir un PDF"
-            }
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "Primero debes subir un PDF"
+                }
+            )
 
         results = vectorstore.similarity_search(
             request.question,
@@ -343,6 +360,11 @@ Pregunta:
 
     except Exception as e:
 
-        return {
-            "error": str(e)
-        }
+        traceback.print_exc()
+
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": str(e)
+            }
+        )
