@@ -1,463 +1,407 @@
-from fastapi import FastAPI, UploadFile, File
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse
-from openai import OpenAI
-from dotenv import load_dotenv
-from pydantic import BaseModel
-import os
-import shutil
-import traceback
+"use client";
 
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import PyPDFLoader
-from langchain_community.vectorstores import FAISS
+import { useState } from "react";
 
-load_dotenv()
+interface Source {
+  page: number;
+  content: string;
+}
 
-app = FastAPI()
+const API_URL = "https://ai-chat-api-rag.onrender.com";
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "https://ai-chat-frontend-one.vercel.app",
-        "https://ai-chat-frontend-h92larnka-jrolandomxs-projects.vercel.app",
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+export default function Home() {
+  const [message, setMessage] = useState("");
+  const [chatResponse, setChatResponse] = useState("");
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+  const [pdfQuestion, setPdfQuestion] = useState("");
+  const [pdfResponse, setPdfResponse] = useState("");
+  const [pdfSources, setPdfSources] = useState<Source[]>([]);
 
-llm = ChatOpenAI(
-    model="gpt-4.1-mini",
-    api_key=os.getenv("OPENAI_API_KEY")
-)
+  const [articleReview, setArticleReview] = useState("");
+  const [uploadStatus, setUploadStatus] = useState("");
 
-vectorstore = None
-uploaded_documents = []
+  const [loadingChat, setLoadingChat] = useState(false);
+  const [loadingPdf, setLoadingPdf] = useState(false);
+  const [loadingReview, setLoadingReview] = useState(false);
 
-conversation_history = [
-    {
-        "role": "system",
-        "content": (
-            "Eres un asistente académico y técnico. "
-            "Respondes de manera clara, breve y paso a paso."
-        ),
-    }
-]
+  async function sendMessage() {
+    if (!message.trim()) return;
 
+    setLoadingChat(true);
+    setChatResponse("");
 
-class ChatRequest(BaseModel):
-    prompt: str
+    try {
+      const response = await fetch(`${API_URL}/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ prompt: message }),
+      });
 
+      const data = await response.json();
 
-class TextRequest(BaseModel):
-    text: str
+      if (!response.ok || data.error) {
+        throw new Error(data.error || "Error desconocido");
+      }
 
+      setChatResponse(data.response || "Sin respuesta");
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : "Error desconocido";
 
-class PDFQuestionRequest(BaseModel):
-    question: str
-
-
-@app.get("/")
-def home():
-    return {
-        "message": "AI Chat API funcionando correctamente"
+      setChatResponse(`Error conectando con la IA: ${message}`);
     }
 
+    setLoadingChat(false);
+  }
 
-@app.post("/chat")
-def chat(request: ChatRequest):
-    conversation_history.append({
-        "role": "user",
-        "content": request.prompt
-    })
+  async function uploadPDF(file: File) {
+    setUploadStatus("Subiendo PDF...");
+    setPdfResponse("");
+    setPdfSources([]);
+    setArticleReview("");
 
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=conversation_history
-    )
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
 
-    assistant_response = response.choices[0].message.content
+      const response = await fetch(`${API_URL}/upload-pdf`, {
+        method: "POST",
+        body: formData,
+      });
 
-    conversation_history.append({
-        "role": "assistant",
-        "content": assistant_response
-    })
+      const data = await response.json();
 
-    return {
-        "response": assistant_response,
-        "history": conversation_history
+      if (!response.ok || data.error) {
+        throw new Error(data.error || "Error desconocido");
+      }
+
+      setUploadStatus(
+        `PDF cargado: ${data.filename} | Páginas: ${data.pages} | Chunks: ${data.chunks}`
+      );
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : "Error desconocido";
+
+      setUploadStatus(`Error cargando PDF: ${message}`);
+    }
+  }
+
+  async function askPDF() {
+    if (!pdfQuestion.trim()) return;
+
+    setLoadingPdf(true);
+    setPdfResponse("Consultando PDF...");
+    setPdfSources([]);
+
+    try {
+      const response = await fetch(`${API_URL}/ask-pdf`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ question: pdfQuestion }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || data.error) {
+        throw new Error(data.error || "Error desconocido");
+      }
+
+      setPdfResponse(data.answer || "Sin respuesta");
+      setPdfSources(data.sources || []);
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : "Error desconocido";
+
+      setPdfResponse(`Error consultando PDF: ${message}`);
     }
 
+    setLoadingPdf(false);
+  }
 
-@app.post("/chat-stream")
-async def chat_stream(request: ChatRequest):
-    conversation_history.append({
-        "role": "user",
-        "content": request.prompt
-    })
+  async function reviewArticle() {
+    setLoadingReview(true);
+    setArticleReview("Generando dictamen académico...");
 
-    stream = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=conversation_history,
-        stream=True
-    )
+    try {
+      const response = await fetch(`${API_URL}/review-article`, {
+        method: "POST",
+      });
 
-    async def generate():
-        full_response = ""
+      const data = await response.json();
 
-        for chunk in stream:
-            content = chunk.choices[0].delta.content
+      if (!response.ok || data.error) {
+        throw new Error(data.error || "Error desconocido");
+      }
 
-            if content:
-                full_response += content
-                yield content
+      setArticleReview(data.review || "No se generó dictamen.");
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : "Error desconocido";
 
-        conversation_history.append({
-            "role": "assistant",
-            "content": full_response
-        })
-
-    return StreamingResponse(
-        generate(),
-        media_type="text/plain"
-    )
-
-
-@app.post("/summarize")
-def summarize(request: TextRequest):
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=[
-            {
-                "role": "system",
-                "content": "Resume el texto en máximo 5 líneas."
-            },
-            {
-                "role": "user",
-                "content": request.text
-            },
-        ]
-    )
-
-    return {
-        "summary": response.choices[0].message.content
+      setArticleReview(`Error generando dictamen: ${message}`);
     }
 
-
-@app.post("/translate")
-def translate(request: TextRequest):
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=[
-            {
-                "role": "system",
-                "content": "Traduce el texto al inglés."
-            },
-            {
-                "role": "user",
-                "content": request.text
-            },
-        ]
-    )
-
-    return {
-        "translation": response.choices[0].message.content
-    }
-
-
-@app.post("/keywords")
-def keywords(request: TextRequest):
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=[
-            {
-                "role": "system",
-                "content": "Extrae de 5 a 10 palabras clave del texto."
-            },
-            {
-                "role": "user",
-                "content": request.text
-            },
-        ]
-    )
-
-    return {
-        "keywords": response.choices[0].message.content
-    }
-
-
-@app.post("/upload-pdf")
-def upload_pdf(file: UploadFile = File(...)):
-    global vectorstore, uploaded_documents
-
-    try:
-        file_path = f"uploaded_{file.filename}"
-
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-
-        print(f"PDF guardado: {file_path}")
-
-        loader = PyPDFLoader(file_path)
-        documents = loader.load()
-
-        uploaded_documents = documents
-
-        print(f"Páginas cargadas: {len(documents)}")
-
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200
-        )
-
-        chunks = text_splitter.split_documents(documents)
-
-        print(f"Chunks creados: {len(chunks)}")
-
-        embeddings = OpenAIEmbeddings(
-            api_key=os.getenv("OPENAI_API_KEY")
-        )
-
-        print("Embeddings inicializados")
-
-        vectorstore = FAISS.from_documents(
-            documents=chunks,
-            embedding=embeddings
-        )
-
-        print("Vectorstore FAISS creado correctamente")
-
-        return {
-            "message": "PDF cargado correctamente",
-            "filename": file.filename,
-            "pages": len(documents),
-            "chunks": len(chunks)
-        }
-
-    except Exception as e:
-        traceback.print_exc()
-
-        return JSONResponse(
-            status_code=500,
-            content={
-                "error": str(e)
-            }
-        )
-
-
-@app.post("/ask-pdf")
-def ask_pdf(request: PDFQuestionRequest):
-    global vectorstore
-
-    try:
-        if vectorstore is None:
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "error": "Primero debes subir un PDF"
-                }
-            )
-
-        results = vectorstore.similarity_search(
-            request.question,
-            k=3
-        )
-
-        context = "\n\n".join([
-            doc.page_content for doc in results
-        ])
-
-        prompt = f"""
-Responde usando únicamente la información del contexto.
-
-Si la respuesta no está en el contexto responde:
-"No encontré esa información en el documento."
-
-Contexto:
-{context}
-
-Pregunta:
-{request.question}
-"""
-
-        response = llm.invoke(prompt)
-
-        return {
-            "question": request.question,
-            "answer": response.content,
-            "sources": [
-                {
-                    "page": doc.metadata.get("page"),
-                    "content": doc.page_content[:300]
-                }
-                for doc in results
-            ]
-        }
-
-    except Exception as e:
-        traceback.print_exc()
-
-        return JSONResponse(
-            status_code=500,
-            content={
-                "error": str(e)
-            }
-        )
-
-
-@app.post("/review-article")
-def review_article():
-    global uploaded_documents
-
-    try:
-        if not uploaded_documents:
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "error": "Primero debes subir un artículo en PDF"
-                }
-            )
-
-        full_text = "\n\n".join([
-            doc.page_content for doc in uploaded_documents
-        ])
-
-        max_chars = 45000
-
-        if len(full_text) > max_chars:
-            full_text = full_text[:max_chars]
-
-        review_prompt = f"""
-Eres un revisor académico experto de artículos científicos con experiencia en publicación,
-arbitraje y evaluación editorial en revistas indexadas nacionales e internacionales.
-
-Tu función es actuar como un dictaminador riguroso, crítico, objetivo y constructivo,
-proporcionando observaciones detalladas que permitan fortalecer la calidad científica,
-metodológica, teórica y editorial del manuscrito evaluado.
-
-Mantén un tono profesional, académico y humano. Evita frases genéricas, superficiales
-o excesivamente duras. Señala fortalezas, áreas de mejora y recomendaciones concretas.
-
-Analiza el siguiente artículo científico:
-
-ARTÍCULO:
-{full_text}
-
-Elabora una revisión académica profesional con esta estructura:
-
-# Observaciones generales
-
-Evalúa la estructura general del artículo:
-- Título
-- Resumen
-- Palabras clave
-- Introducción
-- Planteamiento del problema
-- Objetivos
-- Justificación
-- Marco teórico
-- Metodología
-- Resultados
-- Discusión
-- Conclusiones
-- Referencias
-- Formato APA
-- Coherencia general
-
-# Observaciones metodológicas
-
-Analiza:
-- Claridad metodológica
-- Congruencia entre objetivos, metodología y resultados
-- Tipo de estudio
-- Técnicas de recolección y análisis
-- Validez de resultados
-- Posibles sesgos
-- Limitaciones
-
-# Observaciones teóricas
-
-Analiza:
-- Sustento teórico y conceptual
-- Pertinencia y actualidad de las fuentes
-- Originalidad y aporte científico
-- Profundidad del análisis
-- Relación entre teoría y hallazgos
-
-# Observaciones de resultados y discusión
-
-Analiza:
-- Claridad de resultados
-- Correspondencia entre resultados, tablas, figuras y texto
-- Interpretación de hallazgos
-- Profundidad de discusión
-- Relación con objetivos
-
-# Observaciones de redacción
-
-Identifica:
-- Problemas de redacción académica
-- Repeticiones
-- Ambigüedades
-- Párrafos extensos o poco claros
-- Falta de cohesión
-- Transiciones débiles
-- Posible uso artificial o excesivamente genérico del lenguaje
-
-# Observaciones de formato y referencias
-
-Analiza:
-- Uso de citas
-- Referencias
-- Cumplimiento APA 7
-- Correspondencia entre citas y referencias
-- Tablas y figuras
-
-# Fortalezas del artículo
-
-Menciona fortalezas concretas y específicas.
-
-# Debilidades principales
-
-Menciona debilidades relevantes que deberían corregirse.
-
-# Recomendaciones concretas
-
-Incluye recomendaciones accionables y específicas para mejorar el manuscrito.
-
-# Dictamen final
-
-Incluye:
-- Nivel de aporte científico
-- Nivel de rigor metodológico
-- Nivel de claridad editorial
-- Recomendación editorial, eligiendo solo una:
-  - Aceptado sin cambios
-  - Aceptado con cambios menores
-  - Requiere cambios mayores
-  - Rechazado
-
-Redacta en español académico, con tono profesional y constructivo.
-"""
-
-        response = llm.invoke(review_prompt)
-
-        return {
-            "review": response.content
-        }
-
-    except Exception as e:
-        traceback.print_exc()
-
-        return JSONResponse(
-            status_code=500,
-            content={
-                "error": str(e)
-            }
-        )
+    setLoadingReview(false);
+  }
+
+  function clearChat() {
+    setMessage("");
+    setChatResponse("");
+  }
+
+  function clearPDF() {
+    setPdfQuestion("");
+    setPdfResponse("");
+    setPdfSources([]);
+    setUploadStatus("");
+    setArticleReview("");
+  }
+
+  return (
+    <main className="min-h-screen bg-gradient-to-br from-slate-100 via-white to-slate-200 p-6 text-slate-900">
+      <div className="mx-auto max-w-7xl">
+        <header className="mb-8 rounded-3xl bg-white p-8 shadow-xl">
+          <p className="mb-2 text-sm font-semibold uppercase tracking-[0.25em] text-slate-500">
+            Full Stack AI Application
+          </p>
+
+          <h1 className="text-4xl font-bold tracking-tight text-slate-950 md:text-5xl">
+            AI Academic Assistant
+          </h1>
+
+          <p className="mt-4 max-w-3xl text-lg leading-relaxed text-slate-600">
+            Asistente inteligente para análisis documental, consulta de PDFs,
+            búsqueda semántica, RAG y dictamen académico de artículos
+            científicos.
+          </p>
+
+          <div className="mt-6 flex flex-wrap gap-3">
+            {[
+              "Next.js",
+              "FastAPI",
+              "OpenAI",
+              "LangChain",
+              "FAISS",
+              "RAG",
+              "Academic Reviewer",
+            ].map((tech) => (
+              <span
+                key={tech}
+                className="rounded-full border border-slate-300 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700"
+              >
+                {tech}
+              </span>
+            ))}
+          </div>
+        </header>
+
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+          <section className="flex h-[78vh] flex-col rounded-3xl border border-slate-200 bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-slate-200 p-6">
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-wider text-slate-500">
+                  General Assistant
+                </p>
+
+                <h2 className="mt-1 text-3xl font-bold text-slate-900">
+                  AI Chat
+                </h2>
+              </div>
+
+              <button
+                onClick={clearChat}
+                className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+              >
+                Limpiar
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6">
+              {!chatResponse && !loadingChat && (
+                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-slate-500">
+                  Escribe una pregunta general para conversar con el asistente.
+                </div>
+              )}
+
+              {loadingChat && (
+                <div className="rounded-2xl bg-slate-100 p-4 text-slate-600">
+                  Generando respuesta...
+                </div>
+              )}
+
+              {chatResponse && (
+                <div className="rounded-2xl bg-slate-100 p-5 text-slate-900">
+                  <h3 className="mb-2 font-semibold">Respuesta:</h3>
+                  <p className="whitespace-pre-wrap leading-relaxed">
+                    {chatResponse}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="border-t border-slate-200 p-6">
+              <div className="flex flex-col gap-4">
+                <textarea
+                  className="rounded-2xl border border-slate-300 p-4 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-700"
+                  rows={3}
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
+                  placeholder="Escribe tu pregunta..."
+                />
+
+                <button
+                  onClick={sendMessage}
+                  disabled={loadingChat}
+                  className="rounded-2xl bg-slate-950 px-6 py-3 font-semibold text-white transition hover:bg-slate-800 disabled:bg-slate-400"
+                >
+                  {loadingChat ? "Generando..." : "Enviar"}
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <section className="flex h-[78vh] flex-col rounded-3xl border border-slate-200 bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-slate-200 p-6">
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-wider text-slate-500">
+                  Document Intelligence
+                </p>
+
+                <h2 className="mt-1 text-3xl font-bold text-slate-900">
+                  Chat con PDF
+                </h2>
+              </div>
+
+              <button
+                onClick={clearPDF}
+                className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+              >
+                Limpiar
+              </button>
+            </div>
+
+            <div className="space-y-4 overflow-y-auto p-6">
+              <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5">
+                <label className="mb-2 block font-semibold text-slate-700">
+                  Subir artículo o documento PDF
+                </label>
+
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+
+                    if (file) {
+                      uploadPDF(file);
+                    }
+                  }}
+                  className="w-full rounded-xl border border-slate-300 bg-white p-3 text-slate-900"
+                />
+              </div>
+
+              {uploadStatus && (
+                <div className="rounded-2xl bg-emerald-100 p-4 text-emerald-800">
+                  {uploadStatus}
+                </div>
+              )}
+
+              <textarea
+                className="w-full rounded-2xl border border-slate-300 p-4 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-700"
+                rows={4}
+                value={pdfQuestion}
+                onChange={(e) => setPdfQuestion(e.target.value)}
+                placeholder="Pregunta algo sobre el PDF..."
+              />
+
+              <button
+                onClick={askPDF}
+                disabled={loadingPdf}
+                className="w-full rounded-2xl bg-slate-950 px-6 py-3 font-semibold text-white transition hover:bg-slate-800 disabled:bg-slate-400"
+              >
+                {loadingPdf ? "Consultando..." : "Preguntar al PDF"}
+              </button>
+
+              <button
+                onClick={reviewArticle}
+                disabled={loadingReview}
+                className="w-full rounded-2xl border border-slate-900 bg-white px-6 py-3 font-semibold text-slate-900 transition hover:bg-slate-100 disabled:border-slate-300 disabled:text-slate-400"
+              >
+                {loadingReview ? "Dictaminando..." : "Dictaminar artículo"}
+              </button>
+
+              {pdfResponse && (
+                <div className="rounded-2xl bg-slate-100 p-5 text-slate-900">
+                  <h3 className="mb-2 font-semibold">Respuesta del PDF:</h3>
+                  <p className="whitespace-pre-wrap leading-relaxed">
+                    {pdfResponse}
+                  </p>
+                </div>
+              )}
+
+              {pdfSources.length > 0 && (
+                <div className="space-y-3">
+                  <h3 className="font-semibold text-slate-900">
+                    Fuentes consultadas:
+                  </h3>
+
+                  {pdfSources.map((source, index) => (
+                    <div
+                      key={index}
+                      className="rounded-2xl border border-slate-200 bg-white p-4 text-sm shadow-sm"
+                    >
+                      <p className="font-medium text-slate-900">
+                        Página {source.page + 1}
+                      </p>
+
+                      <p className="mt-2 text-slate-600">
+                        {source.content}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+
+          <section className="flex h-[78vh] flex-col rounded-3xl border border-slate-200 bg-white shadow-xl">
+            <div className="border-b border-slate-200 p-6">
+              <p className="text-sm font-semibold uppercase tracking-wider text-slate-500">
+                Academic Peer Review
+              </p>
+
+              <h2 className="mt-1 text-3xl font-bold text-slate-900">
+                Dictamen académico
+              </h2>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6">
+              {!articleReview && !loadingReview && (
+                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-slate-500">
+                  Sube un artículo en PDF y presiona “Dictaminar artículo” para
+                  generar una evaluación académica profesional.
+                </div>
+              )}
+
+              {articleReview && (
+                <div className="rounded-2xl bg-slate-100 p-5 text-slate-900">
+                  <h3 className="mb-3 font-semibold">
+                    Resultado del dictamen:
+                  </h3>
+
+                  <p className="whitespace-pre-wrap leading-relaxed">
+                    {articleReview}
+                  </p>
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      </div>
+    </main>
+  );
+}
